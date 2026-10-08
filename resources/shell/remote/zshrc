@@ -1,0 +1,45 @@
+# Autobot Terminal shell integration for zsh on a machine reached over SSH (see bash.sh). The ssh wrapper sends
+# this file with the login and starts zsh with ZDOTDIR pointing at its folder, next to the same .zshenv that the
+# local integration uses. This file deletes itself first thing.
+rm -rf "$AUTOBOT_DIR"
+unset AUTOBOT_DIR
+
+# From here on ZDOTDIR is the user's again, and we read what a login shell would: .zprofile before .zshrc and
+# .zlogin after it.
+ZDOTDIR="${AUTOBOT_USER_ZDOTDIR:-$HOME}"
+unset AUTOBOT_USER_ZDOTDIR
+[[ -r /etc/zprofile ]] && source /etc/zprofile
+[[ -r "$ZDOTDIR/.zprofile" ]] && source "$ZDOTDIR/.zprofile"
+[[ -r "$ZDOTDIR/.zshrc" ]] && source "$ZDOTDIR/.zshrc"
+[[ -r /etc/zlogin ]] && source /etc/zlogin
+[[ -r "$ZDOTDIR/.zlogin" ]] && source "$ZDOTDIR/.zlogin"
+
+typeset -g __autobot_status=0
+
+__autobot_status() {
+  __autobot_status=$?
+}
+
+__autobot_precmd() {
+  PROMPT=''
+  PS1=''
+  PS2=''
+  RPROMPT=''
+  RPS1=''
+  printf '\033]7777;R;%s;zsh\007\033]7777;A;%s;%s\007' "$__autobot_who" "$__autobot_status" "$PWD"
+}
+
+__autobot_preexec() {
+  printf '\033]7777;C\007'
+}
+
+precmd_functions=(__autobot_status $precmd_functions __autobot_precmd)
+preexec_functions+=(__autobot_preexec)
+
+setopt histignorespace
+zle_highlight=(paste:none)
+
+# Folders that WSL appends to PATH (/mnt/...) are left out: listing them takes many seconds.
+printf '\033]7777;P;RemoteCommands=%s\007' "$(path=( ${path:#/mnt/*} ); hash -r; print -rl -- ${(ko)commands} ${(ko)aliases} ${(ko)functions:#_*} ${(ko)builtins} ${(ko)reswords} 2>/dev/null | sort -u | __autobot_b64)"
+printf '\033]7777;P;RemoteVariables=%s\007' "$(print -rl -- ${(ko)parameters} 2>/dev/null | sort -u | __autobot_b64)"
+printf '\033]7777;P;RemoteShell=zsh %s\007' "$ZSH_VERSION"

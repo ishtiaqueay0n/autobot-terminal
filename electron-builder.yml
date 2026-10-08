@@ -1,0 +1,153 @@
+# Packaging for Autobot Terminal. Build with `npm run dist:win` (or scripts\build-windows-installer.cmd).
+appId: com.autobot.terminal
+productName: Autobot Terminal
+executableName: autobot
+copyright: Copyright © 2026 Ishtiaque Hossain Ayon
+
+directories:
+  output: release/${version}
+  buildResources: build
+
+files:
+  - out/**
+  - package.json
+  # node-pty: keep only what runs on this platform (no sources, debug symbols or other-OS binaries).
+  - '!node_modules/node-pty/{src,deps,third_party,scripts,typings}/**'
+  - '!node_modules/node-pty/binding.gyp'
+  - '!node_modules/node-pty/**/*.pdb'
+  - '!node_modules/node-pty/prebuilds/{darwin-*,win32-arm64}/**'
+
+extraResources:
+  # Shell hooks are read at runtime from process.resourcesPath/shell.
+  - from: resources/shell
+    to: shell
+    # Dumps a shell may have left in the source folder while it was tested.
+    filter:
+      - '**/*'
+      - '!**/.zcompdump*'
+  - from: resources/icon.png
+    to: icon.png
+  # Bundled knowledge base (scripts/build-kb.mjs): command specs and tldr examples.
+  - from: resources/kb
+    to: kb
+
+# node-pty's native modules load conpty.dll / OpenConsole.exe from their own folder, so the whole
+# package must live outside the asar archive.
+asarUnpack:
+  - node_modules/node-pty/**
+
+# node-pty ships N-API prebuilds that work in Electron as-is; rebuilding would need a C++ toolchain.
+npmRebuild: false
+publish: null
+
+# Lock down Electron features the app never uses. runAsNode off also means an inherited
+# ELECTRON_RUN_AS_NODE variable can no longer turn the app into a plain Node process.
+electronFuses:
+  runAsNode: false
+  enableCookieEncryption: true
+  enableNodeOptionsEnvironmentVariable: false
+  enableNodeCliInspectArguments: false
+  enableEmbeddedAsarIntegrityValidation: true
+  onlyLoadAppFromAsar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  icon: build/icon.ico
+
+nsis:
+  # One click: no questions, installs for the current user (no admin prompt), then starts the app.
+  oneClick: true
+  perMachine: false
+  artifactName: Autobot-Terminal-Setup-${version}.exe
+  shortcutName: Autobot Terminal
+  uninstallDisplayName: Autobot Terminal
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  include: build/installer.nsh
+
+portable:
+  artifactName: Autobot-Terminal-${version}-portable.exe
+
+# Linux: build with scripts/build-linux.sh on the oldest system you want to support (RHEL 8 / Rocky 8: glibc 2.28),
+# because node-pty is compiled there. See docs/INSTALL-LINUX.md.
+linux:
+  target: [rpm, deb, AppImage]
+  category: System;TerminalEmulator
+  icon: build/icon.png
+  maintainer: Ishtiaque Hossain Ayon <317405378+ishtiaqueay0n@users.noreply.github.com>
+  vendor: Ishtiaque Hossain Ayon
+  synopsis: Terminal with a personal command assistant
+  description: >-
+    A terminal for Linux and Windows that suggests commands from your history and from what it learns about your
+    tools, underlines mistakes while you type, and offers fixes when a command fails.
+  # Window class = desktopName in package.json, so the desktop links the running window to its launcher.
+  syncDesktopName: true
+  desktop:
+    entry:
+      Keywords: terminal;shell;console;command;
+  files:
+    # The Windows and macOS prebuilds are of no use here.
+    - "!node_modules/node-pty/prebuilds/**"
+
+appImage:
+  artifactName: Autobot-Terminal-${version}-x86_64.AppImage
+
+deb:
+  packageCategory: utils
+  priority: optional
+  # electron-builder's defaults, plus what a clean Ubuntu install turned out to lack: Electron aborts at startup
+  # without libgbm and libasound (a normal desktop has them; a minimal system does not). libasound2 is called
+  # libasound2t64 on Ubuntu 24.04. libgl1-mesa-dri gives software rendering on machines without a GPU.
+  depends:
+    - libgtk-3-0 | libgtk-3-0t64
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0 | libatspi2.0-0t64
+    - libuuid1
+    - libsecret-1-0
+    - libgbm1
+    - libasound2t64 | libasound2
+    - libdrm2
+    - libx11-xcb1
+    - libgl1
+    - libegl1
+    - libgl1-mesa-dri
+
+rpm:
+  packageCategory: Applications/System
+  # electron-builder's defaults, plus what a clean RHEL 8 install turned out to lack (Electron aborts at startup
+  # without libgbm, libasound, libdrm or libX11-xcb; RHEL 9 pulls them in through GTK, RHEL 8 does not) and
+  # libsecret, which Electron's safeStorage (the Claude API key) loads at runtime. mesa-dri-drivers gives
+  # software rendering on machines without a GPU, such as VMs.
+  depends:
+    - gtk3
+    - libnotify
+    - nss
+    - libXScrnSaver
+    - (libXtst or libXtst6)
+    - xdg-utils
+    - at-spi2-core
+    - (libuuid or libuuid1)
+    - libsecret
+    - mesa-libgbm
+    - alsa-lib
+    - libdrm
+    - libX11-xcb
+    - libglvnd-glx
+    - libglvnd-egl
+    - mesa-dri-drivers
+  # Without this, rpm 4.14+ adds /usr/lib/.build-id/... links that collide with other Electron apps' packages.
+  fpm: ["--rpm-rpmbuild-define=_build_id_links none"]
+  # The default removal script deletes the /usr/bin/autobot launcher on upgrades too; see the script.
+  afterRemove: build/linux/rpm-after-remove.sh
